@@ -6,7 +6,7 @@ from picamera2 import Picamera2
 
 # ---------- CONSTANTS ----------
 GAP_CALIB_FACTOR = 0.957729
-MARKER_SIZE_MM   = 100.0
+MARKER_SIZE_MM   = 54.0
 
 FRAME_SIZE       = (960, 540)
 DRAW_DEBUG       = False
@@ -28,7 +28,7 @@ class ArucoGapMeasurementSystem:
     def __init__(self):
         self.start_time = datetime.now()  # program timer starts
 
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_50)
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         params = cv2.aruco.DetectorParameters()
 
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE

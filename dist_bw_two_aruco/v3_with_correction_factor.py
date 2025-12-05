@@ -6,7 +6,7 @@ from picamera2 import Picamera2
 GAP_CALIB_FACTOR = 0.957729   # precise correction based on your 59.83mm reading
 
 # Real side length of each ArUco marker in mm
-MARKER_SIZE_MM = 100.0
+MARKER_SIZE_MM = 54.0
 
 def order_corners(corners):
     pts = np.array(corners, dtype=np.float32)
@@ -32,7 +32,7 @@ def compute_side_lengths_and_ratios(ordered_corners):
     return side_lengths_px, side_lengths_mm, mm_per_px_list
 
 def main():
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_50)
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     detector = cv2.aruco.ArucoDetector(aruco_dict, cv2.aruco.DetectorParameters())
 
     picam2 = Picamera2()
