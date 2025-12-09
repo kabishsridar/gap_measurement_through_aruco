@@ -45,7 +45,10 @@ def load_calibration(filename="calibration_params.npz"):
                 data = json.load(f)
                 CAMERA_MATRIX = np.array(data['cameraMatrix'])
                 DIST_COEFFS = np.array(data['distCoeffs'])
-        
+        else:
+            print(f"Error: Unsupported calibration file format. Only .npz and .json files are supported.")
+            return False
+
         print(f"Loaded calibration from {filename}")
         return True
     except Exception as e:
