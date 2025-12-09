@@ -575,12 +575,12 @@ class GapMeasurementGUI:
             main={"format": "RGB888", "size": (1280, 720)}
         )
         self.picam2.configure(config)
+        self.picam2.start()
 
-        # Still configuration for 4K captures
+        # Still configuration for 4K captures (create but don't configure yet)
         self.still_config = self.picam2.create_still_configuration(
             main={"format": "RGB888", "size": (3840, 2160)}  # 4K resolution
         )
-        self.picam2.start()
         
     def setup_gui(self):
         """Setup the GUI components with modern layout"""
@@ -594,9 +594,27 @@ class GapMeasurementGUI:
         
         video_label_frame = tk.LabelFrame(left_panel, text="Live Feed", bg='#2b2b2b', fg='white', font=('Arial', 10, 'bold'))
         video_label_frame.pack(padx=5, pady=5)
-        
+
         self.video_label = tk.Label(video_label_frame, bg='black', width=640, height=360)
         self.video_label.pack(padx=2, pady=2)
+
+        # Results display area below video feed
+        results_frame = tk.LabelFrame(left_panel, text="Measurement Results", bg='#2b2b2b', fg='white', font=('Arial', 10, 'bold'))
+        results_frame.pack(padx=5, pady=5, fill=tk.X)
+
+        self.results_text = tk.Text(
+            results_frame,
+            height=8,
+            wrap=tk.WORD,
+            font=('Courier', 9),
+            bg='#1e1e1e',
+            fg='white',
+            padx=5,
+            pady=5
+        )
+        self.results_text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        self.results_text.insert(tk.END, "Distance measurement results will appear here after Start/Stop measurement.\n\nPress 'Start Measurement' to begin.")
+        self.results_text.config(state=tk.DISABLED)
         
         # Right side: Information display
         right_panel = tk.Frame(main_container)
@@ -1716,14 +1734,23 @@ class GapMeasurementGUI:
     def start_measurement(self):
         """Start measurement by capturing first 4K photo"""
         try:
-            # Switch camera to still configuration for 4K capture
-            self.picam2.switch_mode(self.still_config)
+            # Stop current camera operation
+            self.picam2.stop()
+
+            # Configure for 4K capture
+            self.picam2.configure(self.still_config)
+            self.picam2.start()
 
             # Capture 4K image
             frame_4k = self.picam2.capture_array()
 
-            # Switch back to preview
-            self.picam2.switch_mode(self.picam2.camera_configuration)
+            # Stop and reconfigure for preview
+            self.picam2.stop()
+            preview_config = self.picam2.create_preview_configuration(
+                main={"format": "RGB888", "size": (1280, 720)}
+            )
+            self.picam2.configure(preview_config)
+            self.picam2.start()
 
             # Convert to BGR for OpenCV processing
             frame_bgr = cv2.cvtColor(frame_4k, cv2.COLOR_RGB2BGR)
@@ -1746,6 +1773,16 @@ class GapMeasurementGUI:
                 self.stop_button.config(state=tk.NORMAL, bg='#FF9800')
                 self.status_label.config(text="Status: Measurement started - Move object and press Stop", fg='blue')
 
+                # Update results display
+                self.results_text.config(state=tk.NORMAL)
+                self.results_text.delete(1.0, tk.END)
+                self.results_text.insert(tk.END, "MEASUREMENT STARTED\n")
+                self.results_text.insert(tk.END, "=" * 40 + "\n")
+                self.results_text.insert(tk.END, f"First image captured: measurement_start_{timestamp}.jpg\n")
+                self.results_text.insert(tk.END, "Waiting for Stop measurement...\n\n")
+                self.results_text.insert(tk.END, "Move the object/markers to the new position and press 'Stop Measurement'.")
+                self.results_text.config(state=tk.DISABLED)
+
                 print(f"First measurement captured: {filename}")
             else:
                 self.status_label.config(text="Error: Could not detect markers for first measurement", fg='red')
@@ -1757,14 +1794,23 @@ class GapMeasurementGUI:
     def stop_measurement(self):
         """Stop measurement by capturing second 4K photo and calculating distance"""
         try:
-            # Switch camera to still configuration for 4K capture
-            self.picam2.switch_mode(self.still_config)
+            # Stop current camera operation
+            self.picam2.stop()
+
+            # Configure for 4K capture
+            self.picam2.configure(self.still_config)
+            self.picam2.start()
 
             # Capture 4K image
             frame_4k = self.picam2.capture_array()
 
-            # Switch back to preview
-            self.picam2.switch_mode(self.picam2.camera_configuration)
+            # Stop and reconfigure for preview
+            self.picam2.stop()
+            preview_config = self.picam2.create_preview_configuration(
+                main={"format": "RGB888", "size": (1280, 720)}
+            )
+            self.picam2.configure(preview_config)
+            self.picam2.start()
 
             # Convert to BGR for OpenCV processing
             frame_bgr = cv2.cvtColor(frame_4k, cv2.COLOR_RGB2BGR)
@@ -1796,6 +1842,8 @@ class GapMeasurementGUI:
                         text=f"Distance moved: {distance_moved['total_distance']:.2f}mm (X:{distance_moved['dx']:.2f}, Y:{distance_moved['dy']:.2f}, Z:{distance_moved['dz']:.2f})",
                         fg='green'
                     )
+                    # Display detailed results in GUI
+                    self._display_measurement_results(self.first_measurement, second_measurement, distance_moved, timestamp)
                 else:
                     self.status_label.config(text="Measurement complete - check saved files", fg='green')
 
@@ -1993,6 +2041,52 @@ class GapMeasurementGUI:
 
         except Exception as e:
             print(f"Error saving measurement comparison: {e}")
+
+    def _display_measurement_results(self, first_measurement, second_measurement, distance_moved, timestamp):
+        """Display measurement results in the GUI text area - simplified view"""
+        try:
+            # Clear previous results
+            self.results_text.config(state=tk.NORMAL)
+            self.results_text.delete(1.0, tk.END)
+
+            # Change to larger, more legible font
+            self.results_text.config(font=('Courier', 14, 'bold'), fg='#00FF00')
+
+            # Build simple results text
+            results = ""
+
+            # Calculate individual pair movements
+            top_distance = 0.0
+            bottom_distance = 0.0
+
+            if (first_measurement["top"].get("gap_mm") and second_measurement["top"].get("gap_mm")):
+                top_distance = second_measurement["top"]["gap_mm"] - first_measurement["top"]["gap_mm"]
+
+            if (first_measurement["bottom"].get("gap_mm") and second_measurement["bottom"].get("gap_mm")):
+                bottom_distance = second_measurement["bottom"]["gap_mm"] - first_measurement["bottom"]["gap_mm"]
+
+            # Display results in large, clear text
+            results += "DISTANCE MOVED\n"
+            results += "=" * 30 + "\n\n"
+
+            results += f"TOP PAIR:     {top_distance:+.2f} mm\n\n"
+            results += f"BOTTOM PAIR:  {bottom_distance:+.2f} mm\n\n"
+
+            if distance_moved and distance_moved["method"] == "3D_pose":
+                results += f"TOTAL 3D:     {distance_moved['total_distance']:.2f} mm"
+
+            # Update the text area with larger font
+            self.results_text.config(font=('Courier', 12, 'bold'))
+            self.results_text.insert(tk.END, results)
+            self.results_text.config(state=tk.DISABLED)
+
+        except Exception as e:
+            print(f"Error displaying measurement results: {e}")
+            # Fallback: show error in results area
+            self.results_text.config(state=tk.NORMAL)
+            self.results_text.delete(1.0, tk.END)
+            self.results_text.insert(tk.END, f"Error: {str(e)}")
+            self.results_text.config(state=tk.DISABLED)
 
     def _write_measurement_data(self, f, measurement, label):
         """Write measurement data to file"""
