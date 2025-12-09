@@ -4,7 +4,7 @@ from picamera2 import Picamera2
 
 def main():
     # ---------- ArUco dictionary & detector (OpenCV 4.7+ style) ----------
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_50)
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     detector_params = cv2.aruco.DetectorParameters()
     detector = cv2.aruco.ArucoDetector(aruco_dict, detector_params)
 
