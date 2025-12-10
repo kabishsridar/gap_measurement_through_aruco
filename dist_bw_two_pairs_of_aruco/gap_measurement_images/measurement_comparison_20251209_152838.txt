@@ -1,0 +1,36 @@
+================================================================================
+ARUCO MARKER DISTANCE MEASUREMENT COMPARISON
+================================================================================
+Timestamp: 20251209_152838
+First Image: measurement_start_20251209_152838.jpg
+Second Image: measurement_stop_20251209_152838.jpg
+
+DISTANCE MOVED:
+----------------------------------------
+Method: 3D Pose Tracking
+Total Distance: 10.73 mm
+X Movement: -6.78 mm
+Y Movement: 8.28 mm
+Z Movement: -0.78 mm
+
+FIRST MEASUREMENT (START):
+----------------------------------------
+Top Pair Gap (START): 18.57 mm
+Top Pair Ratio (START): 0.20622
+Top Left Marker Position (START): X=219.80, Y=108.45, Z=262.73 mm
+Bottom Pair Gap (START): 17.17 mm
+Bottom Pair Ratio (START): 0.19892
+Bottom Left Marker Position (START): X=205.58, Y=227.83, Z=251.76 mm
+
+================================================================================
+
+SECOND MEASUREMENT (STOP):
+----------------------------------------
+Top Pair Gap (STOP): 88.52 mm
+Top Pair Ratio (STOP): 0.20745
+Top Left Marker Position (STOP): X=213.03, Y=116.73, Z=261.95 mm
+Bottom Pair Gap (STOP): 17.06 mm
+Bottom Pair Ratio (STOP): 0.20007
+Bottom Left Marker Position (STOP): X=208.81, Y=220.06, Z=252.42 mm
+
+================================================================================
