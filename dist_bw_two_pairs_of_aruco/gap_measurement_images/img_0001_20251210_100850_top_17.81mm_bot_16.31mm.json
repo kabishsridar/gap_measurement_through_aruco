@@ -1,0 +1,63 @@
+{
+  "timestamp": "20251210_100850",
+  "image_filename": "img_0001_20251210_100850_top_17.81mm_bot_16.31mm.jpg",
+  "image_count": 1,
+  "calibration_factor": 0.9845,
+  "marker_size_mm": 54.0,
+  "top_pair": {
+    "status": "Active",
+    "average_gap_mm": 17.807174682617188,
+    "mm_per_px_ratio": 0.3841549337547659,
+    "individual_measurements": {
+      "top": null,
+      "mid": {
+        "gap_pixels": 45.62,
+        "gap_mm_raw": 17.525,
+        "gap_mm_calibrated": 17.256000518798828
+      },
+      "bottom": {
+        "gap_pixels": 48.54,
+        "gap_mm_raw": 18.645,
+        "gap_mm_calibrated": 18.358999252319336
+      }
+    },
+    "corner_positions": {
+      "left_marker": {
+        "tl": {
+          "x": 451,
+          "y": 67
+        },
+        "tr": {
+          "x": 594,
+          "y": 70
+        },
+        "br": {
+          "x": 587,
+          "y": 211
+        },
+        "bl": {
+          "x": 446,
+          "y": 207
+        }
+      },
+      "right_marker": {
+        "tl": {
+          "x": 637,
+          "y": 74
+        },
+        "tr": {
+          "x": 777,
+          "y": 77
+        },
+        "br": {
+          "x": 777,
+          "y": 215
+        },
+        "bl": {
+          "x": 636,
+          "y": 214
+        }
+      }
+    },
+    "tilt_information": {
+      "tilt_angle_degrees": 

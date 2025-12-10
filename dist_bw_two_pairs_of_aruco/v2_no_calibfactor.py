@@ -13,8 +13,7 @@ import queue
 # Real side length of each ArUco marker in mm
 MARKER_SIZE_MM = 54.0   # marker size in mm
 
-# Empirical calibration factor for gap in mm (tuned from your test)
-GAP_CALIB_FACTOR = 0.9845
+# Gap measurements rely directly on mm-per-pixel (no empirical calibration factor)
 
 # Tilt detection threshold (degrees) - warn if tilt exceeds this
 TILT_WARNING_THRESHOLD = 5.0  # degrees
@@ -265,10 +264,10 @@ def detect_marker_tilt(ordered_corners):
     return tilt_angle, correction_factor, tilt_status
 
 
-def compute_perp_gap_for_point(start_point, n_unit, seg_a, seg_b, mm_per_px, calib_factor, tilt_correction=1.0):
+def compute_perp_gap_for_point(start_point, n_unit, seg_a, seg_b, mm_per_px, tilt_correction=1.0):
     """
     Shoot a ray from start_point along n_unit to intersect the segment (seg_a -> seg_b).
-    Returns (gap_px, gap_mm_raw, gap_mm_calib, hit_point) or (None, None, None, None) if no hit.
+    Returns (gap_px, gap_mm_raw, gap_mm_corrected, hit_point) or (None, None, None, None) if no hit.
     """
     res = intersect_ray_segment(start_point, n_unit, seg_a, seg_b)
     if res is None:
@@ -277,8 +276,8 @@ def compute_perp_gap_for_point(start_point, n_unit, seg_a, seg_b, mm_per_px, cal
     t_min, hit_point = res
     gap_px = float(t_min)  # since n_unit is unit length
     gap_mm_raw = gap_px * mm_per_px
-    gap_mm_calib = gap_mm_raw * calib_factor * tilt_correction  # Apply tilt correction
-    return gap_px, gap_mm_raw, gap_mm_calib, hit_point
+    gap_mm_corrected = gap_mm_raw * tilt_correction  # Apply tilt correction only
+    return gap_px, gap_mm_raw, gap_mm_corrected, hit_point
 
 
 def process_pair(frame, corners_list, idx_left, idx_right,
@@ -454,25 +453,24 @@ def process_pair(frame, corners_list, idx_left, idx_right,
     }
 
     valid_gaps_px = []
-    valid_gaps_mm_calib = []
+    valid_gaps_mm = []
     hit_points = {}
 
     for name, pt in named_points.items():
-        gap_px, gap_mm_raw, gap_mm_calib, hit_pt = compute_perp_gap_for_point(
+        gap_px, gap_mm_raw, gap_mm_corrected, hit_pt = compute_perp_gap_for_point(
             pt,
             n_unit,
             right_left_top,
             right_left_bottom,
             avg_mm_per_px,
-            GAP_CALIB_FACTOR,
             avg_tilt_correction,  # Apply tilt correction
         )
-        gaps_info[name] = (gap_px, gap_mm_raw, gap_mm_calib)
+        gaps_info[name] = (gap_px, gap_mm_raw, gap_mm_corrected)
         hit_points[name] = hit_pt
 
         if gap_px is not None:
             valid_gaps_px.append(gap_px)
-            valid_gaps_mm_calib.append(gap_mm_calib)
+            valid_gaps_mm.append(gap_mm_corrected)
 
     if len(valid_gaps_px) == 0:
         return None, avg_mm_per_px, None, {"left": left_corner_info, "right": right_corner_info}, tilt_info, pose_info
@@ -494,8 +492,8 @@ def process_pair(frame, corners_list, idx_left, idx_right,
 
     # average over valid lines
     avg_gap_px = float(np.mean(valid_gaps_px))
-    avg_gap_mm_calib = float(np.mean(valid_gaps_mm_calib))
-    final_gap_mm = avg_gap_mm_calib
+    avg_gap_mm = float(np.mean(valid_gaps_mm))
+    final_gap_mm = avg_gap_mm
 
     corner_info = {
         "left": left_corner_info,
@@ -509,8 +507,7 @@ class GapMeasurementGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("ArUco Gap Measurement System")
-        # Larger default window so bottom buttons and frames stay visible
-        self.root.geometry("1800x1000")
+        self.root.geometry("1600x800")
         self.root.configure(bg='#f0f0f0')
         
         # Create output folder
@@ -577,9 +574,8 @@ class GapMeasurementGUI:
         
         self.picam2 = Picamera2()
         # Preview configuration for live view
-        # Use a 1080p stream so we cover a larger area with normal-quality detail
         config = self.picam2.create_preview_configuration(
-            main={"format": "RGB888", "size": (1920, 1080)}
+            main={"format": "RGB888", "size": (1280, 720)}
         )
         self.picam2.configure(config)
         self.picam2.start()
@@ -602,7 +598,7 @@ class GapMeasurementGUI:
         video_label_frame = tk.LabelFrame(left_panel, text="Live Feed", bg='#2b2b2b', fg='white', font=('Arial', 10, 'bold'))
         video_label_frame.pack(padx=5, pady=5)
 
-        self.video_label = tk.Label(video_label_frame, bg='black', width=960, height=540)
+        self.video_label = tk.Label(video_label_frame, bg='black', width=640, height=360)
         self.video_label.pack(padx=2, pady=2)
 
         # Results display area below video feed
@@ -1096,8 +1092,8 @@ class GapMeasurementGUI:
                         bottom_corners = corners_info_bottom if corners_info_bottom else {}
                         bottom_tilt_info = tilt_info_bottom
                 
-                # Resize frame for on-screen display (slightly downscaled 1080p)
-                display_frame = cv2.resize(frame, (960, 540))
+                # Resize frame for smaller display (640x360)
+                display_frame = cv2.resize(frame, (640, 360))
                 
                 # Convert to RGB for tkinter
                 frame_rgb_display = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
@@ -1221,8 +1217,8 @@ class GapMeasurementGUI:
                 for name in ["Top", "Mid", "Bottom"]:
                     gap_data = info["top"]["gaps"].get(name)
                     if gap_data and gap_data[0] is not None:
-                        _, _, gap_mm_calib = gap_data
-                        self.top_measurements_labels[name].config(text=f"{gap_mm_calib:.2f} mm", fg='#333333')
+                        _, _, gap_mm_corrected = gap_data
+                        self.top_measurements_labels[name].config(text=f"{gap_mm_corrected:.2f} mm", fg='#333333')
                     else:
                         self.top_measurements_labels[name].config(text="-- mm", fg='#999999')
 
@@ -1321,8 +1317,8 @@ class GapMeasurementGUI:
                 for name in ["Top", "Mid", "Bottom"]:
                     gap_data = info["bottom"]["gaps"].get(name)
                     if gap_data and gap_data[0] is not None:
-                        _, _, gap_mm_calib = gap_data
-                        self.bottom_measurements_labels[name].config(text=f"{gap_mm_calib:.2f} mm", fg='#333333')
+                        _, _, gap_mm_corrected = gap_data
+                        self.bottom_measurements_labels[name].config(text=f"{gap_mm_corrected:.2f} mm", fg='#333333')
                     else:
                         self.bottom_measurements_labels[name].config(text="-- mm", fg='#999999')
 
@@ -1408,10 +1404,10 @@ class GapMeasurementGUI:
                 for name in ["Top", "Mid", "Bottom"]:
                     gap_data = self.last_top_info["gaps"].get(name)
                     if gap_data and gap_data[0] is not None:
-                        gap_px, gap_mm_raw, gap_mm_calib = gap_data
+                        gap_px, gap_mm_raw, gap_mm_corrected = gap_data
                         text += f"  {name:6s}: {gap_px:6.1f} px | "
                         text += f"Raw: {gap_mm_raw:6.2f} mm | "
-                        text += f"Calib: {gap_mm_calib:6.2f} mm\n"
+                        text += f"Corrected: {gap_mm_corrected:6.2f} mm\n"
                     else:
                         text += f"  {name:6s}: --\n"
         else:
@@ -1434,10 +1430,10 @@ class GapMeasurementGUI:
                 for name in ["Top", "Mid", "Bottom"]:
                     gap_data = self.last_bottom_info["gaps"].get(name)
                     if gap_data and gap_data[0] is not None:
-                        gap_px, gap_mm_raw, gap_mm_calib = gap_data
+                        gap_px, gap_mm_raw, gap_mm_corrected = gap_data
                         text += f"  {name:6s}: {gap_px:6.1f} px | "
                         text += f"Raw: {gap_mm_raw:6.2f} mm | "
-                        text += f"Calib: {gap_mm_calib:6.2f} mm\n"
+                        text += f"Corrected: {gap_mm_corrected:6.2f} mm\n"
                     else:
                         text += f"  {name:6s}: --\n"
         else:
@@ -1527,7 +1523,6 @@ class GapMeasurementGUI:
         text += "DETAILED INFORMATION\n"
         text += "=" * 60 + "\n\n"
         
-        text += f"Calibration Factor: {GAP_CALIB_FACTOR:.4f}\n"
         text += f"Marker Size: {MARKER_SIZE_MM} mm\n"
         text += f"Output Folder: {self.output_folder}\n"
         text += f"Images Saved: {self.image_count}\n\n"
@@ -1540,12 +1535,10 @@ class GapMeasurementGUI:
             text += f"Status: {status_indicator} {self.last_top_info['status']}\n"
             text += f"Average Gap: {self.last_top_info['gap_mm']:.4f} mm\n"
             text += f"mm/px Ratio: {self.last_top_info['ratio']:.6f}\n"
-            text += f"Calibration Applied: Yes\n"
         else:
             text += "Status: ○ Waiting for markers...\n"
             text += "Average Gap: --\n"
             text += "mm/px Ratio: --\n"
-            text += "Calibration Applied: --\n"
         
         text += "\n" + "-" * 60 + "\n"
         text += "BOTTOM PAIR DETAILS:\n"
@@ -1555,12 +1548,10 @@ class GapMeasurementGUI:
             text += f"Status: {status_indicator} {self.last_bottom_info['status']}\n"
             text += f"Average Gap: {self.last_bottom_info['gap_mm']:.4f} mm\n"
             text += f"mm/px Ratio: {self.last_bottom_info['ratio']:.6f}\n"
-            text += f"Calibration Applied: Yes\n"
         else:
             text += "Status: ○ Waiting for markers...\n"
             text += "Average Gap: --\n"
             text += "mm/px Ratio: --\n"
-            text += "Calibration Applied: --\n"
         
         # Only update the text
         self.details_text.delete(1.0, tk.END)
@@ -1594,7 +1585,6 @@ class GapMeasurementGUI:
                         "timestamp": timestamp,
                         "image_filename": base_filename + ".jpg",
                         "image_count": self.image_count,
-                        "calibration_factor": GAP_CALIB_FACTOR,
                         "marker_size_mm": MARKER_SIZE_MM,
                         "top_pair": self._extract_pair_data(self.current_info["top"], self.last_top_corners),
                         "bottom_pair": self._extract_pair_data(self.current_info["bottom"], self.last_bottom_corners)
@@ -1650,11 +1640,11 @@ class GapMeasurementGUI:
             for name in ["Top", "Mid", "Bottom"]:
                 gap_data = pair_info["gaps"].get(name)
                 if gap_data and gap_data[0] is not None:
-                    gap_px, gap_mm_raw, gap_mm_calib = gap_data
+                    gap_px, gap_mm_raw, gap_mm_corrected = gap_data
                     data["individual_measurements"][name.lower()] = {
                         "gap_pixels": _f(round(gap_px, 2)),
                         "gap_mm_raw": _f(round(gap_mm_raw, 3)),
-                        "gap_mm_calibrated": _f(round(gap_mm_calib, 3))
+                        "gap_mm_corrected": _f(round(gap_mm_corrected, 3))
                     }
                 else:
                     data["individual_measurements"][name.lower()] = None
@@ -1695,7 +1685,6 @@ class GapMeasurementGUI:
             f.write("=" * 70 + "\n")
             f.write(f"Timestamp: {timestamp}\n")
             f.write(f"Image Count: {self.image_count}\n")
-            f.write(f"Calibration Factor: {GAP_CALIB_FACTOR:.4f}\n")
             f.write(f"Marker Size: {MARKER_SIZE_MM} mm\n")
             f.write("\n" + "=" * 70 + "\n\n")
             
@@ -1725,8 +1714,8 @@ class GapMeasurementGUI:
                     for name in ["Top", "Mid", "Bottom"]:
                         gap_data = self.last_top_info["gaps"].get(name)
                         if gap_data and gap_data[0] is not None:
-                            _, _, gap_mm_calib = gap_data
-                            f.write(f"  {name:6s}: {gap_mm_calib:.2f} mm\n")
+                            _, _, gap_mm_corrected = gap_data
+                            f.write(f"  {name:6s}: {gap_mm_corrected:.2f} mm\n")
                         else:
                             f.write(f"  {name:6s}: -- mm\n")
             else:
@@ -1762,8 +1751,8 @@ class GapMeasurementGUI:
                     for name in ["Top", "Mid", "Bottom"]:
                         gap_data = self.last_bottom_info["gaps"].get(name)
                         if gap_data and gap_data[0] is not None:
-                            _, _, gap_mm_calib = gap_data
-                            f.write(f"  {name:6s}: {gap_mm_calib:.2f} mm\n")
+                            _, _, gap_mm_corrected = gap_data
+                            f.write(f"  {name:6s}: {gap_mm_corrected:.2f} mm\n")
                         else:
                             f.write(f"  {name:6s}: -- mm\n")
             else:

@@ -71,6 +71,7 @@ def get_marker_pose_3d(corners, marker_size, camera_matrix, dist_coeffs):
     # For newer opencv-contrib-python, use cv2.aruco.estimatePoseSingleMarkers
     # or objPoints logic with solvePnP.
     # This works for standard opencv-contrib setups.
+    # gets the rotation vector, translation vector, and the rejections of the markers
     rvec, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(c, marker_size, camera_matrix, dist_coeffs)
 
     # Unpack from (1,1,3) array
@@ -1202,10 +1203,10 @@ class RPiCamArucoDistance:
                 print(f"Could not read image: {image_path}")
                 return None
 
-            print(f"Processing image: {os.path.basename(image_path)}")
+            print(f"Processing image: {os.path.basename(image_path)}") # base name returns the file name alone without the path
 
             # Detect ArUco markers
-            corners_list, ids, _ = self.detector.detectMarkers(frame)
+            corners_list, ids, _ = self.detector.detectMarkers(frame) # gets the corners, ids, and rejections of the markers
 
             measurement_data = {
                 "top": {},
@@ -1215,13 +1216,13 @@ class RPiCamArucoDistance:
             }
 
             if ids is not None and len(corners_list) >= 2:
-                cv2.aruco.drawDetectedMarkers(frame, corners_list, ids)
+                cv2.aruco.drawDetectedMarkers(frame, corners_list, ids) # draws the markers on the frame
 
                 # Compute marker centers
-                centers = []
-                for i, c in enumerate(corners_list):
-                    pts = c.reshape((4, 2))
-                    center = np.mean(pts, axis=0)
+                centers = [] # list of tuples (index, x, y) for each marker center
+                for i, c in enumerate(corners_list): # i is idx and c is corners
+                    pts = c.reshape((4, 2)) # reshape the corners into a 4x2 array
+                    center = np.mean(pts, axis=0)# not sure what this does
                     centers.append((i, center[0], center[1]))
 
                 centers_sorted_by_y = sorted(centers, key=lambda t: t[2])
