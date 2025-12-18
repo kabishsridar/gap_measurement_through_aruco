@@ -1,0 +1,25 @@
+================================================================================
+ARUCO MARKER DISTANCE MEASUREMENT COMPARISON
+================================================================================
+Timestamp: 20251217_103002
+First Image: measurement_start_20251217_103002.jpg
+Second Image: measurement_stop_20251217_103002.jpg
+
+DISTANCE MOVED:
+----------------------------------------
+Method: Gap Difference
+Gap Change: 12.87 mm
+
+FIRST MEASUREMENT (START):
+----------------------------------------
+Top Pair Gap (START): 17.11 mm
+Top Pair Ratio (START): 0.21583
+
+================================================================================
+
+SECOND MEASUREMENT (STOP):
+----------------------------------------
+Top Pair Gap (STOP): 29.98 mm
+Top Pair Ratio (STOP): 0.21577
+
+================================================================================

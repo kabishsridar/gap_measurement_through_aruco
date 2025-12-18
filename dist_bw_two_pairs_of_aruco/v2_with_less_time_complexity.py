@@ -6,7 +6,7 @@ from picamera2 import Picamera2
 MARKER_SIZE_MM = 54.0   # marker size in mm
 
 # Empirical calibration factor for gap in mm (tuned from your test)
-
+GAP_CALIB_FACTOR = 0.9845
 
 
 def order_corners(corners):
@@ -43,10 +43,10 @@ def compute_side_lengths_and_ratios(ordered_corners):
     """
     tl, tr, br, bl = ordered_corners
 
-    top_px = float(np.linalg.norm(tr - tl))
-    right_px = float(np.linalg.norm(br - tr))
-    bottom_px = float(np.linalg.norm(bl - br))
-    left_px = float(np.linalg.norm(tl - bl))
+    top_px = np.linalg.norm(tr - tl)
+    right_px = np.linalg.norm(br - tr)
+    bottom_px = np.linalg.norm(bl - br)
+    left_px = np.linalg.norm(tl - bl)
 
     # mm/px ratios for each side using real marker size
     top_ratio = MARKER_SIZE_MM / top_px
@@ -101,9 +101,9 @@ def intersect_ray_segment(p0, r, a, b):
     return t, intersection_point
 
 
-def compute_ray_gap_for_point(start_point, n_unit, seg_a, seg_b, mm_per_px, calib_factor):
+def compute_perp_gap_for_point(start_point, n_unit, seg_a, seg_b, mm_per_px, calib_factor):
     """
-    Shoot a ray from start_point along n_unit to intersect the segment (seg_a -> seg_b).
+    Shoot a perpendicular ray from start_point along n_unit to intersect the segment (seg_a -> seg_b).
     Returns (gap_px, gap_mm_raw, gap_mm_calib, hit_point) or (None, None, None, None) if no hit.
     """
     res = intersect_ray_segment(start_point, n_unit, seg_a, seg_b)
@@ -123,7 +123,7 @@ def process_pair(frame, corners_list, idx_left, idx_right,
     """
     Process one pair of markers:
     - compute mm/px (average over 8 ratios of this pair only)
-    - shoot 3 straight horizontal lines (to the right) from right edge of left marker
+    - shoot 3 perpendicular lines from right edge of left marker
     - intersect with LEFT edge of right marker
     - draw lines and text for this pair
 
@@ -137,38 +137,39 @@ def process_pair(frame, corners_list, idx_left, idx_right,
     left_corners = order_corners(left_corners_raw)
     right_corners = order_corners(right_corners_raw)
 
-    # centers for label positioning
+    # centers for rough label positioning
     left_center = np.mean(left_corners, axis=0).astype(int)
     right_center = np.mean(right_corners, axis=0).astype(int)
 
-    # label ABOVE each marker, using top-most y of that marker
+    # ------- NEW: label above each marker (using its topmost y) -------
     left_top_y = int(np.min(left_corners[:, 1]))
     right_top_y = int(np.min(right_corners[:, 1]))
 
     cv2.putText(
         frame,
         label_left,
-        (left_center[0] - 60, left_top_y - 20),   # a bit bigger offset for 4K
+        (left_center[0] - 50, left_top_y - 10),   # above left marker
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
+        0.7,
         (255, 255, 0),
         2,
     )
     cv2.putText(
         frame,
         label_right,
-        (right_center[0] - 60, right_top_y - 20),
+        (right_center[0] - 50, right_top_y - 10),  # above right marker
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
+        0.7,
         (255, 255, 0),
         2,
     )
+    # -----------------------------------------------------------------
 
     # compute side lengths & mm/px for both markers (only this pair)
     _, _, left_ratios = compute_side_lengths_and_ratios(left_corners)
     _, _, right_ratios = compute_side_lengths_and_ratios(right_corners)
 
-    # use only these 8 ratios for this pair
+    # --- use only these 8 ratios for this pair ---
     all_ratios = left_ratios + right_ratios   # 8 values for this pair
     avg_mm_per_px = float(np.mean(all_ratios))
 
@@ -176,20 +177,38 @@ def process_pair(frame, corners_list, idx_left, idx_right,
     l_tl, l_tr, l_br, l_bl = left_corners
     r_tl, r_tr, r_br, r_bl = right_corners
 
-    # ====== STRAIGHT-LINE GAP LOGIC (TOP, MID, BOTTOM) ======
+    # ========== PERPENDICULAR GAP LOGIC (TOP, MID, BOTTOM) ==========
 
-    # Inner right edge of LEFT marker: between l_tr (top) and l_br (bottom)
+    # Right edge of LEFT marker: between l_tr (top) and l_br (bottom)
     left_top_point = l_tr
     left_bottom_point = l_br
     left_mid_point = (l_tr + l_br) / 2.0
 
-    # Inner LEFT edge of RIGHT marker: between r_tl (top) and r_bl (bottom)
+    # LEFT side of RIGHT marker (inner-facing edge): between TL and BL
     right_left_top = r_tl
     right_left_bottom = r_bl
 
-    # FIXED ray direction: straight to the right along image X axis
-    n_unit = np.array([1.0, 0.0], dtype=float)
+    # center of RIGHT marker (for direction)
+    right_mid_point = np.mean(right_corners, axis=0)
 
+    # direction vector of left inner edge (downwards)
+    edge_vec = left_bottom_point - left_top_point  # from top to bottom
+
+    # perpendicular direction
+    n = np.array([edge_vec[1], -edge_vec[0]], dtype=float)
+    n_norm = np.linalg.norm(n)
+    if n_norm < 1e-9:
+        # degenerate, cannot compute
+        return None, None
+
+    n_unit = n / n_norm
+
+    # choose direction that points towards RIGHT marker, using midpoint
+    vec_to_right = right_mid_point - left_mid_point
+    if np.dot(n_unit, vec_to_right) < 0:
+        n_unit = -n_unit  # flip to face right marker
+
+    # compute perpendicular gaps for TOP, MID, BOTTOM from left edge
     gaps_info = {}
     named_points = {
         "Top": left_top_point,
@@ -202,13 +221,13 @@ def process_pair(frame, corners_list, idx_left, idx_right,
     hit_points = {}
 
     for name, pt in named_points.items():
-        gap_px, gap_mm_raw, gap_mm_calib, hit_pt = compute_ray_gap_for_point(
+        gap_px, gap_mm_raw, gap_mm_calib, hit_pt = compute_perp_gap_for_point(
             pt,
             n_unit,
             right_left_top,
             right_left_bottom,
             avg_mm_per_px,
-
+            GAP_CALIB_FACTOR,
         )
         gaps_info[name] = (gap_px, gap_mm_raw, gap_mm_calib)
         hit_points[name] = hit_pt
@@ -218,18 +237,19 @@ def process_pair(frame, corners_list, idx_left, idx_right,
             valid_gaps_mm_calib.append(gap_mm_calib)
 
     if len(valid_gaps_px) == 0:
+        # text to indicate no intersection for this pair
         cv2.putText(
             frame,
             f"{pair_name}: no intersection",
-            (40, text_y_offset),
+            (20, text_y_offset),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
+            0.55,
             (0, 0, 255),
             2,
         )
         return None, avg_mm_per_px
 
-    # Draw the three straight horizontal lines and circles where valid
+    # Draw the three perpendicular lines and circles where valid
     for name, pt in named_points.items():
         gap_px, _, _ = gaps_info[name]
         hit_pt = hit_points[name]
@@ -239,39 +259,47 @@ def process_pair(frame, corners_list, idx_left, idx_right,
                 (int(pt[0]), int(pt[1])),
                 (int(hit_pt[0]), int(hit_pt[1])),
                 (0, 255, 0),
-                3,
+                2,
             )
-            cv2.circle(frame, (int(pt[0]), int(pt[1])), 5, (0, 0, 255), -1)
-            cv2.circle(frame, (int(hit_pt[0]), int(hit_pt[1])), 5, (255, 0, 0), -1)
+            cv2.circle(frame, (int(pt[0]), int(pt[1])), 4, (0, 0, 255), -1)
+            cv2.circle(frame, (int(hit_pt[0]), int(hit_pt[1])), 4, (255, 0, 0), -1)
 
     # average over valid lines
     avg_gap_px = float(np.mean(valid_gaps_px))
     avg_gap_mm_calib = float(np.mean(valid_gaps_mm_calib))
     final_gap_mm = avg_gap_mm_calib
 
-    # Text overlay for this pair (scaled up a bit for 4K)
+    # Text overlay for this pair (same as before)
     y = text_y_offset
     cv2.putText(
         frame,
-        f"{pair_name} mm/px (avg 8): {avg_mm_per_px:.5f}",
-        (40, y),
+        f"{pair_name} mm/px (avg 8): {avg_mm_per_px:.4f}",
+        (20, y),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
+        0.55,
         (255, 255, 0),
         2,
     )
-    y += 30
-    
-    y += 35
+    y += 22
+    cv2.putText(
+        frame,
+        f"{pair_name} calib factor: {GAP_CALIB_FACTOR:.4f}",
+        (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (255, 255, 255),
+        2,
+    )
+    y += 25
     for name in ["Top", "Mid", "Bottom"]:
         gap_px, gap_mm_raw, gap_mm_calib = gaps_info[name]
         if gap_px is not None:
             cv2.putText(
                 frame,
-                f"{pair_name} {name}: {gap_px:.1f}px | raw {gap_mm_raw:.2f}mm",
-                (40, y),
+                f"{pair_name} {name}: {gap_px:.1f}px | raw {gap_mm_raw:.2f}mm -> calib {gap_mm_calib:.2f}mm",
+                (20, y),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.5,
                 (0, 255, 0),
                 2,
             )
@@ -279,23 +307,23 @@ def process_pair(frame, corners_list, idx_left, idx_right,
             cv2.putText(
                 frame,
                 f"{pair_name} {name}: no intersection",
-                (40, y),
+                (20, y),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.5,
                 (0, 0, 255),
                 2,
             )
-        y += 28
+        y += 18
 
-    """ cv2.putText(
+    cv2.putText(
         frame,
         f"{pair_name} AVG GAP: {avg_gap_px:.1f}px | {final_gap_mm:.2f}mm",
-        (40, y + 10),
+        (20, y + 5),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
+        0.6,
         (0, 200, 255),
         2,
-    ) """
+    )
 
     return final_gap_mm, avg_mm_per_px
 
@@ -308,9 +336,8 @@ def main():
 
     # ---- Picamera2 setup ----
     picam2 = Picamera2()
-    # 4K frame; adjust if your camera supports a different 4K mode
     config = picam2.create_preview_configuration(
-        main={"format": "RGB888", "size": (3840, 2160)}
+        main={"format": "RGB888", "size": (1280, 720)}
     )
     picam2.configure(config)
     picam2.start()
@@ -326,7 +353,7 @@ def main():
         if ids is not None and len(corners_list) >= 2:
             cv2.aruco.drawDetectedMarkers(frame, corners_list, ids)
 
-            # compute (marker_index, x, y) for each marker center
+            # compute (index, x, y) for each marker center
             centers = []
             for i, c in enumerate(corners_list):
                 pts = c.reshape((4, 2))
@@ -336,43 +363,47 @@ def main():
             # sort markers by y (top to bottom)
             centers_sorted_by_y = sorted(centers, key=lambda t: t[2])
 
-            # --- TOP pair (LEFT TOP1 & LEFT TOP2) from top two markers by y ---
+            # --- TOP pair (LEFT TOP1 & LEFT TOP2) from top two markers by y
             if len(centers_sorted_by_y) >= 2:
                 top_two = centers_sorted_by_y[:2]
                 top_two_sorted_by_x = sorted(top_two, key=lambda t: t[1])  # sort by x
                 top_left_idx = top_two_sorted_by_x[0][0]
                 top_right_idx = top_two_sorted_by_x[1][0]
 
-                process_pair(
+                gap_top_mm, ratio_top = process_pair(
                     frame,
                     corners_list,
                     top_left_idx,
                     top_right_idx,
                     label_left="LEFT TOP1",
                     label_right="LEFT TOP2",
-                    text_y_offset=80,
+                    text_y_offset=30,
                     pair_name="TOP PAIR",
                 )
+            else:
+                gap_top_mm, ratio_top = None, None
 
-            # --- BOTTOM pair (LEFT BOTTOM1 & LEFT BOTTOM2) from bottom two markers by y ---
+            # --- BOTTOM pair (LEFT BOTTOM1 & LEFT BOTTOM2) from bottom two markers by y
             if len(centers_sorted_by_y) >= 4:
                 bottom_two = centers_sorted_by_y[-2:]
                 bottom_two_sorted_by_x = sorted(bottom_two, key=lambda t: t[1])
                 bottom_left_idx = bottom_two_sorted_by_x[0][0]
                 bottom_right_idx = bottom_two_sorted_by_x[1][0]
 
-                process_pair(
+                gap_bottom_mm, ratio_bottom = process_pair(
                     frame,
                     corners_list,
                     bottom_left_idx,
                     bottom_right_idx,
                     label_left="LEFT BOTTOM1",
                     label_right="LEFT BOTTOM2",
-                    text_y_offset=420,
+                    text_y_offset=230,
                     pair_name="BOTTOM PAIR",
                 )
+            else:
+                gap_bottom_mm, ratio_bottom = None, None
 
-        cv2.imshow("Top & Bottom ArUco Gap Measurement - 4K", frame)
+        cv2.imshow("Top & Bottom ArUco Gap Measurement", frame)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
